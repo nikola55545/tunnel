@@ -31,6 +31,7 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   final AudioPlayer _audioPlayer = AudioPlayer();
+
   late ScrollController _scrollController;
   String currentUserId = FirebaseAuth.instance.currentUser!.uid;
   // ignore: unused_field
@@ -40,13 +41,11 @@ class _ChatPageState extends State<ChatPage> {
   ];
 
   Future<void> _playSendMessageSound() async {
-    await _audioPlayer
-        .play(AssetSource('assets/sounds/send_message_sound.mp3'));
+    await _audioPlayer.play(AssetSource('send.wav'));
   }
 
   Future<void> _playReceiveMessageSound() async {
-    await _audioPlayer
-        .play(AssetSource('assets/sounds/receive_message_sound.mp3'));
+    await _audioPlayer.play(AssetSource('get.wav'));
   }
 
   // ignore: unused_element
