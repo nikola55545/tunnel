@@ -77,7 +77,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
         children: [
           Expanded(
             child: Material(
-              color: Colors.black,
+              color: _getCustomColor(context) == Colors.black
+                  ? Colors.black
+                  : Colors.white,
               child: isLoading
                   ? const Center(
                       child:
@@ -137,164 +139,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
-  void _showModalBottomSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(16),
-        ),
-      ),
-      builder: (BuildContext context) {
-        final Color customColor = _getCustomColor(context);
-
-        return FractionallySizedBox(
-          heightFactor: 0.93,
-          child: Column(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: customColor,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(16),
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      child: const Text(
-                        '',
-                        style: TextStyle(),
-                      ),
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                    const Text(
-                      'New Contact',
-                      style: TextStyle(
-                        fontSize: 16,
-                      ),
-                    ),
-                    CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(),
-                      ),
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                margin: const EdgeInsets.all(16),
-                child: CupertinoSearchTextField(
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
-                  style: TextStyle(
-                    color: MediaQuery.of(context).platformBrightness ==
-                            Brightness.dark
-                        ? CupertinoColors.white
-                        : CupertinoColors.black,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('users')
-                      .snapshots(),
-                  builder: (BuildContext context,
-                      AsyncSnapshot<QuerySnapshot> snapshot) {
-                    if (snapshot.hasError) {
-                      return Text('Error: ${snapshot.error}');
-                    }
-
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: CupertinoActivityIndicator(),
-                      );
-                    }
-
-                    final List<QueryDocumentSnapshot> users =
-                        snapshot.data?.docs ?? [];
-
-                    final List<QueryDocumentSnapshot> filteredUsers = users
-                        .where((user) => user['name']
-                            .toLowerCase()
-                            .contains(_searchQuery.toLowerCase()))
-                        .toList();
-
-                    return ListView.separated(
-                      separatorBuilder: (BuildContext context, int index) {
-                        return const Divider(
-                          color: Colors.grey,
-                          height: 1,
-                        );
-                      },
-                      itemCount: filteredUsers.length,
-                      itemBuilder: (BuildContext context, int index) {
-                        final user = filteredUsers[index];
-                        final String id = user['id'];
-                        final String itemTitle = user['name'];
-                        final String itemImage = user['image'];
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundImage: NetworkImage(itemImage),
-                            ),
-                            title: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(itemTitle),
-                                if (!favorites.any(
-                                    (favorite) => favorite.id == id.toString()))
-                                  IconButton(
-                                    icon: const Icon(Icons.add),
-                                    onPressed: () {
-                                      setState(() {
-                                        favorites.add(FavoriteUser(
-                                          id: id.toString(),
-                                          name: itemTitle,
-                                          image: itemImage,
-                                        ));
-                                        _saveFavorites(favorites);
-                                      });
-                                    },
-                                  ),
-                              ],
-                            ),
-                            onTap: () {
-                              // Handle list item tap
-                              // Add your logic here
-                            },
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   void _saveFavorites(List<FavoriteUser> favorites) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     final userRef =
@@ -337,5 +181,172 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
 
     return favorites;
+  }
+
+  void _showModalBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(16),
+          ),
+        ),
+        builder: (BuildContext context) {
+          final Color customColor = _getCustomColor(context);
+
+          return FractionallySizedBox(
+            heightFactor: 0.93,
+            child: Column(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: customColor,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(16),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        child: const Text(
+                          '',
+                          style: TextStyle(),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                      ),
+                      const Text(
+                        'New Contact',
+                        style: TextStyle(
+                          fontSize: 16,
+                        ),
+                      ),
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  margin: const EdgeInsets.all(16),
+                  child: CupertinoSearchTextField(
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                    style: TextStyle(
+                      color: MediaQuery.of(context).platformBrightness ==
+                              Brightness.dark
+                          ? CupertinoColors.white
+                          : CupertinoColors.black,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .snapshots(),
+                    builder: (BuildContext context,
+                        AsyncSnapshot<QuerySnapshot> snapshot) {
+                      if (snapshot.hasError) {
+                        return Text('Error: ${snapshot.error}');
+                      }
+
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                          child: CupertinoActivityIndicator(),
+                        );
+                      }
+
+                      final List<QueryDocumentSnapshot> users =
+                          snapshot.data?.docs ?? [];
+
+                      final List<QueryDocumentSnapshot> filteredUsers = users
+                          .where((user) => user['name']
+                              .toLowerCase()
+                              .contains(_searchQuery.toLowerCase()))
+                          .toList();
+
+                      final currentUser = FirebaseAuth.instance.currentUser;
+                      final currentUserId = currentUser?.uid;
+
+                      return ListView.separated(
+                        separatorBuilder: (BuildContext context, int index) {
+                          return const Divider(
+                            color: Colors.grey,
+                            height: 1,
+                          );
+                        },
+                        itemCount: filteredUsers.length,
+                        itemBuilder: (BuildContext context, int index) {
+                          final user = filteredUsers[index];
+                          final String id = user['id'];
+                          final String itemTitle = user['name'];
+                          final String itemImage = user['image'];
+
+                          // Exclude the current user from the list
+                          if (id != currentUserId) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundImage: NetworkImage(itemImage),
+                                ),
+                                title: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(itemTitle),
+                                    if (!favorites.any((favorite) =>
+                                        favorite.id == id.toString()))
+                                      IconButton(
+                                        icon: const Icon(Icons.add),
+                                        onPressed: () {
+                                          setState(() {
+                                            favorites.add(FavoriteUser(
+                                              id: id.toString(),
+                                              name: itemTitle,
+                                              image: itemImage,
+                                            ));
+                                            _saveFavorites(favorites);
+                                          });
+                                        },
+                                      ),
+                                  ],
+                                ),
+                                onTap: () {
+                                  // Handle list item tap
+                                  // Add your logic here
+                                },
+                              ),
+                            );
+                          } else {
+                            return const SizedBox
+                                .shrink(); // Skip current user's data
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        });
   }
 }

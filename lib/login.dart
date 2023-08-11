@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -5,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:tunnel/main.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'verification_code.dart';
+import 'package:simple_animations/simple_animations.dart';
 
 class LoginPage extends StatelessWidget {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -178,12 +180,12 @@ class LoginPage extends StatelessWidget {
                             } catch (e) {
                               showDialog(
                                 context: context,
-                                builder: (context) => AlertDialog(
+                                builder: (context) => CupertinoAlertDialog(
                                   title: const Text('Login Failed'),
                                   content: const Text(
                                       'An error occurred while logging in.'),
                                   actions: [
-                                    TextButton(
+                                    CupertinoDialogAction(
                                       onPressed: () {
                                         Navigator.pop(context);
                                       },
@@ -243,21 +245,18 @@ class LoginPage extends StatelessWidget {
                                     context, '/main');
                               }
                             } catch (e) {
-                              showDialog(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Login Failed'),
-                                  content: const Text(
-                                      'An error occurred while logging in.'),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.pop(context);
-                                      },
-                                      child: const Text('OK'),
-                                    ),
-                                  ],
-                                ),
+                              AlertDialog(
+                                title: const Text('Login Failed'),
+                                content: const Text(
+                                    'An error occurred while logging in.'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                    },
+                                    child: const Text('OK'),
+                                  ),
+                                ],
                               );
                             }
                           },
@@ -305,6 +304,7 @@ class LoginPage extends StatelessWidget {
                               if (userCredential != null) {
                                 final User user = userCredential.user!;
                                 await _storeUserInfo(user);
+                                // ignore: use_build_context_synchronously
                                 Navigator.pushReplacementNamed(
                                     context, '/main');
                               }

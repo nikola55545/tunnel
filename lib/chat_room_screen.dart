@@ -2,7 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+// ignore: unused_import
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_chat_types/flutter_chat_types.dart' as types;
@@ -10,8 +13,11 @@ import 'package:flutter_chat_types/flutter_chat_types.dart' as types;
 import 'package:flutter/rendering.dart';
 // import 'package:flutter_link_previewer/flutter_link_previewer.dart';
 import 'package:image_picker/image_picker.dart';
-
 import 'contacts_screen.dart';
+import 'package:bubble/bubble.dart';
+// ignore: depend_on_referenced_packages
+import 'package:intl/intl.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class ChatPage extends StatefulWidget {
   final FavoriteUser contact;
@@ -24,12 +30,97 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
   late ScrollController _scrollController;
   String currentUserId = FirebaseAuth.instance.currentUser!.uid;
-
+  // ignore: unused_field
+  late Stream<List<types.Message>> _messagesStream;
   final List<types.Message> _messages = [
     // Add more messages here
   ];
+
+  Future<void> _playSendMessageSound() async {
+    await _audioPlayer
+        .play(AssetSource('assets/sounds/send_message_sound.mp3'));
+  }
+
+  Future<void> _playReceiveMessageSound() async {
+    await _audioPlayer
+        .play(AssetSource('assets/sounds/receive_message_sound.mp3'));
+  }
+
+  // ignore: unused_element
+  String _formatTimestamp(int timestamp) {
+    final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  Widget _bubbleBuilder(
+    Widget child, {
+    required types.Message message,
+    required dynamic nextMessageInGroup,
+  }) {
+    final DateTime messageTime = DateTime.fromMillisecondsSinceEpoch(
+        message.createdAt ?? DateTime.now().millisecondsSinceEpoch);
+    final String timestamp = DateFormat('H:mm').format(messageTime);
+
+    bool isCurrentUser = message.author.id == currentUserId;
+    bool isDarkMode = getCustomColor(context) == Colors.black;
+
+    Color bubbleColor = isCurrentUser
+        ? const Color(0xff0075FB)
+        : isDarkMode
+            ? const Color.fromARGB(255, 82, 82, 82)
+            : const Color(0xffE6E6E8);
+
+    Color textColor = isCurrentUser
+        ? CupertinoColors.white
+        : isDarkMode
+            ? Colors.white
+            : const Color.fromARGB(255, 159, 159, 159);
+
+    bool isShortMessage = (message as types.TextMessage).text.length <= 20;
+
+    return Bubble(
+      radius: const Radius.circular(10),
+      padding: const BubbleEdges.only(top: 2, bottom: 8, left: 4, right: 8),
+      elevation: 0,
+      color: bubbleColor,
+      margin: nextMessageInGroup != null &&
+              nextMessageInGroup is bool &&
+              nextMessageInGroup
+          ? const BubbleEdges.symmetric(horizontal: 6)
+          : null,
+      nip: nextMessageInGroup != null &&
+              nextMessageInGroup is bool &&
+              nextMessageInGroup
+          ? BubbleNip.no
+          : isCurrentUser
+              ? BubbleNip.rightBottom
+              : BubbleNip.leftBottom,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          child,
+          if (isShortMessage)
+            const SizedBox(height: 0)
+          else
+            const SizedBox(height: 0), // Adjust the spacing as needed
+          Text(
+            timestamp,
+            style: TextStyle(
+              fontSize: 10,
+              color: textColor,
+              decoration: TextDecoration.none,
+              fontWeight: FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _handleSendPressed(types.PartialText message) async {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
@@ -51,7 +142,6 @@ class _ChatPageState extends State<ChatPage> {
       // Initialize Firebase if not already initialized
       await Firebase.initializeApp();
 
-      // Check if either chat room already exists
       final chatRoomRef1 = FirebaseFirestore.instance
           .collection('chat_rooms')
           .doc(chatRoomName1);
@@ -59,32 +149,41 @@ class _ChatPageState extends State<ChatPage> {
           .collection('chat_rooms')
           .doc(chatRoomName2);
 
-      // Use a batch write to only create a document if it doesn't exist
+      // Use batch write to update the appropriate chat room
       final batch = FirebaseFirestore.instance.batch();
 
-      batch.set(chatRoomRef1, {}, SetOptions(merge: true));
-      batch.set(chatRoomRef2, {}, SetOptions(merge: true));
-
-      // Add the message to the chat room as a subcollection
-      final messageData = {
-        'author_id': currentUserId,
-        'text': message.text,
-        'created_at': FieldValue.serverTimestamp(),
-      };
-      batch.set(
-          chatRoomRef1.collection('messages').doc(newMessage.id), messageData);
-      batch.set(
-          chatRoomRef2.collection('messages').doc(newMessage.id), messageData);
+      // Set the new message in the correct chat room
+      if ((await chatRoomRef1.get()).exists) {
+        batch.set(
+          chatRoomRef1.collection('messages').doc(newMessage.id),
+          {
+            'author_id': currentUserId,
+            'text': message.text,
+            'created_at': FieldValue.serverTimestamp(),
+          },
+        );
+      } else if ((await chatRoomRef2.get()).exists) {
+        batch.set(
+          chatRoomRef2.collection('messages').doc(newMessage.id),
+          {
+            'author_id': currentUserId,
+            'text': message.text,
+            'created_at': FieldValue.serverTimestamp(),
+          },
+        );
+      }
 
       await batch.commit();
 
-      // Update the UI with the new message
+      // Add the new message to the _messages list
       setState(() {
-        _messages.insert(0, newMessage);
+        _messages.add(newMessage);
       });
+      await _playSendMessageSound();
     } catch (e) {
-      // Handle any errors here
-      print('Error sending message: $e');
+      if (kDebugMode) {
+        print('Error sending message: $e');
+      }
     }
   }
 
@@ -121,48 +220,52 @@ class _ChatPageState extends State<ChatPage> {
           .collection('chat_rooms')
           .doc(chatRoomName2);
 
-      // Fetch messages from the first chat room document
-      final messagesSnapshot1 = await chatRoomRef1
-          .collection('messages')
-          .orderBy('created_at', descending: true)
-          .get();
-      final messages1 = messagesSnapshot1.docs.map((doc) {
-        final data = doc.data();
-        return types.TextMessage(
-          author: types.User(
-            id: data['author_id'],
-          ),
-          createdAt: data['created_at'].millisecondsSinceEpoch,
-          id: doc.id,
-          text: data['text'],
-        );
-      }).toList();
+      // Fetch messages from the chat room that exists or fallback to the other one
+      CollectionReference messagesCollection;
+      Stream<QuerySnapshot> messagesStream;
 
-      // Fetch messages from the second chat room document
-      final messagesSnapshot2 = await chatRoomRef2
-          .collection('messages')
-          .orderBy('created_at', descending: true)
-          .get();
-      final messages2 = messagesSnapshot2.docs.map((doc) {
-        final data = doc.data();
-        return types.TextMessage(
-          author: types.User(
-            id: data['author_id'],
-          ),
-          createdAt: data['created_at'].millisecondsSinceEpoch,
-          id: doc.id,
-          text: data['text'],
-        );
-      }).toList();
+      if ((await chatRoomRef1.get()).exists) {
+        messagesCollection = chatRoomRef1.collection('messages');
+      } else {
+        messagesCollection = chatRoomRef2.collection('messages');
+      }
 
-      // Combine both sets of messages and update the _messages list
-      final List<types.TextMessage> allMessages = [...messages1, ...messages2];
-      setState(() {
-        _messages.addAll(allMessages);
+      messagesStream = messagesCollection
+          .orderBy('created_at', descending: true)
+          .snapshots();
+
+      messagesStream.listen((querySnapshot) {
+        final messages = querySnapshot.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+
+          final authorId = data['author_id'] as String?;
+          final createdAt =
+              (data['created_at'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+          final text = data['text'] as String?;
+
+          return types.TextMessage(
+            author: types.User(
+              id: authorId ?? '',
+            ),
+            createdAt: createdAt,
+            id: doc.id,
+            text: text ?? '',
+          );
+        }).toList();
+
+        _playReceiveMessageSound();
+
+        setState(() {
+          _messages.clear();
+          _messages.addAll(
+              messages); // Reverse the order to show the latest message at the bottom
+        });
       });
     } catch (e) {
       // Handle any errors here
-      print('Error loading messages: $e');
+      if (kDebugMode) {
+        print('Error loading messages: $e');
+      }
     }
   }
 
@@ -247,54 +350,60 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDarkMode = getCustomColor(context) == Colors.black;
+
+    TextStyle generateReceivedMessageBodyTextStyle() {
+      return TextStyle(
+        decoration: TextDecoration.none,
+        color: isDarkMode ? Colors.white : Colors.black,
+        fontSize: 16,
+        fontWeight: FontWeight.normal,
+      );
+    }
+
     final theme = DefaultChatTheme(
-      sentMessageBodyLinkTextStyle: const TextStyle(
-          decoration: TextDecoration.underline,
-          color: CupertinoColors.white,
-          decorationColor: CupertinoColors.white,
-          decorationStyle: TextDecorationStyle.solid,
-          fontWeight: FontWeight.normal),
-      receivedMessageBodyLinkTextStyle: const TextStyle(
-          decoration: TextDecoration.underline,
-          color: CupertinoColors.black,
-          decorationColor: CupertinoColors.black,
-          decorationStyle: TextDecorationStyle.solid,
-          fontWeight: FontWeight.normal),
-      backgroundColor: getCustomColor(context),
-      inputBackgroundColor: getCustomColor(context) == Colors.black
-          ? const Color(0xFF1B1B1B)
-          : CupertinoColors.white,
-      inputTextColor: getCustomColor(context) == Colors.black
-          ? CupertinoColors.white
-          : CupertinoColors.black,
-      inputContainerDecoration: BoxDecoration(
-        color: getCustomColor(context) == Colors.black
+        sentMessageBodyLinkTextStyle: const TextStyle(
+            decoration: TextDecoration.underline,
+            color: CupertinoColors.white,
+            decorationColor: CupertinoColors.white,
+            decorationStyle: TextDecorationStyle.solid,
+            fontWeight: FontWeight.normal),
+        receivedMessageBodyLinkTextStyle: const TextStyle(
+            decoration: TextDecoration.underline,
+            color: CupertinoColors.black,
+            decorationColor: CupertinoColors.black,
+            decorationStyle: TextDecorationStyle.solid,
+            fontWeight: FontWeight.normal),
+        backgroundColor: getCustomColor(context),
+        inputBackgroundColor: getCustomColor(context) == Colors.black
             ? const Color(0xFF1B1B1B)
             : CupertinoColors.white,
-        borderRadius: const BorderRadius.all(Radius.circular(0)),
-      ),
-      primaryColor: Colors.blue,
-      secondaryColor: Colors.white,
-      messageInsetsVertical: double.parse(8.toString()),
-      messageInsetsHorizontal: double.parse(14.toString()),
-      dateDividerTextStyle: TextStyle(
-          color: getCustomColor(context) == const Color(0xFF1B1B1B)
-              ? CupertinoColors.white
-              : CupertinoColors.black,
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          decoration: TextDecoration.none),
-      sentMessageBodyTextStyle: const TextStyle(
-          decoration: TextDecoration.none,
-          color: CupertinoColors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.normal),
-      receivedMessageBodyTextStyle: const TextStyle(
-          decoration: TextDecoration.none,
-          color: CupertinoColors.black,
-          fontSize: 16,
-          fontWeight: FontWeight.normal),
-    );
+        inputTextColor: getCustomColor(context) == Colors.black
+            ? CupertinoColors.white
+            : CupertinoColors.black,
+        inputContainerDecoration: BoxDecoration(
+          color: getCustomColor(context) == Colors.black
+              ? const Color(0xFF1B1B1B)
+              : CupertinoColors.white,
+          borderRadius: const BorderRadius.all(Radius.circular(0)),
+        ),
+        primaryColor: Colors.blue,
+        secondaryColor: Colors.white,
+        messageInsetsVertical: double.parse(8.toString()),
+        messageInsetsHorizontal: double.parse(14.toString()),
+        dateDividerTextStyle: TextStyle(
+            color: getCustomColor(context) == Colors.black
+                ? CupertinoColors.white
+                : CupertinoColors.black,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            decoration: TextDecoration.none),
+        sentMessageBodyTextStyle: const TextStyle(
+            decoration: TextDecoration.none,
+            color: CupertinoColors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.normal),
+        receivedMessageBodyTextStyle: generateReceivedMessageBodyTextStyle());
 
     final appBarColor = getCustomColor(context) == Colors.black
         ? const Color(0xFF1B1B1B)
@@ -346,6 +455,7 @@ class _ChatPageState extends State<ChatPage> {
               }
             },
             child: Chat(
+              bubbleBuilder: _bubbleBuilder,
               messages: _messages.toList(),
               user: types.User(id: currentUserId), // Set the current user
               emptyState: Center(
@@ -382,9 +492,6 @@ class _ChatPageState extends State<ChatPage> {
                 onTextChanged: (text) {
                   // Handle text changed
                 },
-                sendButtonVisibilityMode: SendButtonVisibilityMode.always,
-                autocorrect: true,
-                autofocus: false,
                 enableSuggestions: true,
                 enabled: true,
               ),
@@ -393,7 +500,6 @@ class _ChatPageState extends State<ChatPage> {
                 typingMode: TypingIndicatorMode.name,
               ),
               usePreviewData: true,
-              //time in bubble
             ),
           ),
         ),
