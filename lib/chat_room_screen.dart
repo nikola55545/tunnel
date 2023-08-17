@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -17,7 +20,8 @@ import 'contacts_screen.dart';
 import 'package:bubble/bubble.dart';
 // ignore: depend_on_referenced_packages
 import 'package:intl/intl.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'chat_info.dart';
+import 'package:dio/dio.dart';
 
 class ChatPage extends StatefulWidget {
   final FavoriteUser contact;
@@ -31,7 +35,7 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   final AudioPlayer _audioPlayer = AudioPlayer();
-
+  bool _isNewMessageArrived = false;
   late ScrollController _scrollController;
   String currentUserId = FirebaseAuth.instance.currentUser!.uid;
   // ignore: unused_field
@@ -177,6 +181,7 @@ class _ChatPageState extends State<ChatPage> {
       // Add the new message to the _messages list
       setState(() {
         _messages.add(newMessage);
+        _isNewMessageArrived = false;
       });
       await _playSendMessageSound();
     } catch (e) {
@@ -252,12 +257,14 @@ class _ChatPageState extends State<ChatPage> {
           );
         }).toList();
 
-        _playReceiveMessageSound();
-
         setState(() {
           _messages.clear();
-          _messages.addAll(
-              messages); // Reverse the order to show the latest message at the bottom
+          _messages.addAll(messages);
+          if (_messages.isNotEmpty &&
+              _messages.first.author.id != currentUserId) {
+            _isNewMessageArrived = true;
+            _playReceiveMessageSound(); // Play receive sound
+          }
         });
       });
     } catch (e) {
@@ -351,6 +358,14 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     final bool isDarkMode = getCustomColor(context) == Colors.black;
 
+    if (_isNewMessageArrived) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+
     TextStyle generateReceivedMessageBodyTextStyle() {
       return TextStyle(
         decoration: TextDecoration.none,
@@ -425,12 +440,14 @@ class _ChatPageState extends State<ChatPage> {
         trailing: GestureDetector(
           onTap: () {
             //todo open contact info page
-            // Navigator.push(
-            //   context,
-            //   MaterialPageRoute(
-            //     builder: (context) => ContactInfo(),
-            //   ),
-            // );
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatInfoScreen(
+                  contact: widget.contact,
+                ),
+              ),
+            );
           },
           //user image
           child: CircleAvatar(

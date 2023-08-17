@@ -1,12 +1,16 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:bottom_navy_bar/bottom_navy_bar.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 // ignore: unused_import
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// core Flutter primitives
+import 'package:flutter/foundation.dart';
 
 import 'login.dart';
 import 'contacts_screen.dart';
@@ -17,11 +21,34 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   runApp(MyApp());
+
+  late final FirebaseMessaging _messaging;
+
+  // 2. Instantiate Firebase Messaging
+  _messaging = FirebaseMessaging.instance;
+
+  // 3. On iOS, this helps to take the user permissions
+  NotificationSettings settings = await _messaging.requestPermission(
+    alert: true,
+    badge: true,
+    provisional: false,
+    sound: true,
+  );
+
+  if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+    if (kDebugMode) {
+      print('User granted permission');
+    }
+    // TODO: handle the received notifications
+  } else {
+    if (kDebugMode) {
+      print('User declined or has not accepted permission');
+    }
+  }
 }
 
 class MyApp extends StatelessWidget {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-
   MyApp({super.key});
 
   @override

@@ -43,7 +43,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return CupertinoPageScaffold(
       backgroundColor: Colors.black,
       navigationBar: CupertinoNavigationBar(
-        middle: const Text('Contacts'),
+        middle: const Text('Favourites'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
           child: Material(
@@ -77,7 +77,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         children: [
           Expanded(
             child: Material(
-              color: _getCustomColor(context) == Colors.black
+              color: Theme.of(context).brightness == Brightness.dark
                   ? Colors.black
                   : Colors.white,
               child: isLoading
@@ -222,7 +222,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         },
                       ),
                       const Text(
-                        'New Contact',
+                        'Add Favorites',
                         style: TextStyle(
                           fontSize: 16,
                         ),
