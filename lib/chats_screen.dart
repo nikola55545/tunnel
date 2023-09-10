@@ -1,13 +1,12 @@
-import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-
+import 'package:intl/intl.dart';
 import 'chat_room_screen.dart';
 import 'contacts_screen.dart';
+import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({Key? key}) : super(key: key);
@@ -35,6 +34,30 @@ class _ChatsScreenState extends State<ChatsScreen> {
     // }
     super.initState();
     getData(); // Call the method to fetch data when the screen initializes
+    _printLastMessagesForAllUsers();
+  }
+
+  Future<void> _printLastMessagesForAllUsers() async {
+    try {
+      await printLastMessagesForAllUsers();
+    } catch (error) {
+      print('Error printing last messages: $error');
+    }
+  }
+
+  String _formatMessageTime(DateTime messageTime) {
+    final now = DateTime.now();
+    final difference = now.difference(messageTime);
+
+    if (difference.inDays == 0) {
+      return DateFormat.Hm().format(messageTime); // Show only hour and minute
+    } else if (difference.inDays == 1) {
+      return 'Yesterday ${DateFormat.Hm().format(messageTime)}';
+    } else {
+      return DateFormat.yMd()
+          .add_Hm()
+          .format(messageTime); // Show full date and hour minute
+    }
   }
 
   Future<void> getData() async {
@@ -47,6 +70,58 @@ class _ChatsScreenState extends State<ChatsScreen> {
       if (kDebugMode) {
         print("Error fetching data: $error");
       }
+    }
+  }
+
+  Future<void> _handleRefresh() async {
+    // Here, you can put your logic to refresh the data.
+    // For example, you can call your `getData` method again.
+    await getData();
+    // You can also put any other refreshing logic you need.
+
+    // You should call `setState` to update the UI after refreshing.
+    setState(() {});
+  }
+
+  Future<void> printLastMessagesForAllUsers() async {
+    final QuerySnapshot chatRoomsSnapshot =
+        await FirebaseFirestore.instance.collection('chat_rooms').get();
+
+    for (final chatRoomDoc in chatRoomsSnapshot.docs) {
+      final chatRoomId = chatRoomDoc.id;
+      final userIDs = chatRoomId.split('-');
+      final otherUserId = userIDs.firstWhere((id) => id != _currentUserId);
+
+      final otherUserSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(otherUserId)
+          .get();
+
+      if (!otherUserSnapshot.exists) {
+        continue; // Skip if other user's data doesn't exist
+      }
+
+      final otherUserName = otherUserSnapshot['name'] as String;
+      final lastMessageSnapshot = await FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(chatRoomId)
+          .collection('messages')
+          .orderBy('created_at', descending: true)
+          .limit(1)
+          .get()
+          .then((snapshot) => snapshot.docs.firstOrNull);
+
+      if (lastMessageSnapshot == null) {
+        continue; // Skip if no messages found
+      }
+
+      final lastMessageText = lastMessageSnapshot['text'] as String;
+      final lastMessageTime = lastMessageSnapshot['created_at'] as Timestamp;
+
+      // print('User: $otherUserName ($otherUserId)');
+      // print('Last Message: $lastMessageText');
+      // print('Last Message Time: ${lastMessageTime.toDate()}');
+      // print('---');
     }
   }
 
@@ -88,96 +163,153 @@ class _ChatsScreenState extends State<ChatsScreen> {
               },
             ),
           ),
-          child: Center(
-            child: ListView.builder(
-              itemCount: _chatRooms.length,
-              itemBuilder: (BuildContext context, int index) {
-                String documentId = _chatRooms[index].id;
+          child: ListView.builder(
+            itemCount: _chatRooms.length,
+            itemBuilder: (BuildContext context, int index) {
+              String documentId = _chatRooms[index].id;
+              List<String> userIds = documentId.split('-');
+              String otherUserId =
+                  userIds.firstWhere((id) => id != _currentUserId);
 
-                // Extract the other user's ID from the document ID
-                List<String> userIds = documentId.split('-');
-                String otherUserId =
-                    userIds.firstWhere((id) => id != _currentUserId);
-
-                // Query the "users" collection for the other user's data
-                return FutureBuilder<DocumentSnapshot>(
-                  future: _firestore.collection('users').doc(otherUserId).get(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return SizedBox(
-                        width: MediaQuery.of(context).size.width,
-                        height: MediaQuery.of(context).size.height - 100,
-                        child: Container(
-                          color: Colors
-                              .transparent, // Set your desired background color here
-                          child: const Center(
-                            child: CupertinoActivityIndicator(),
-                          ),
+              return FutureBuilder<DocumentSnapshot>(
+                future: _firestore.collection('users').doc(otherUserId).get(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      height: MediaQuery.of(context).size.height - 100,
+                      child: Container(
+                        color: Colors.transparent,
+                        child: const Center(
+                          child: CupertinoActivityIndicator(),
                         ),
-                      );
-                    }
+                      ),
+                    );
+                  }
 
-                    if (snapshot.hasError) {
-                      return Text('Error: ${snapshot.error}');
-                    }
+                  if (snapshot.hasError) {
+                    return Text('Error: ${snapshot.error}');
+                  }
 
-                    if (!snapshot.hasData) {
-                      return const Text('No data available');
-                    }
+                  if (!snapshot.hasData) {
+                    return const Text('No data available');
+                  }
 
-                    // Extract name and photo from the retrieved data
-                    String otherUserName =
-                        snapshot.data?.get('name') ?? 'No Name';
-                    String otherUserPhoto =
-                        snapshot.data?.get('image') ?? 'No Image URL';
+                  String otherUserName =
+                      snapshot.data?.get('name') ?? 'No Name';
+                  String otherUserPhoto =
+                      snapshot.data?.get('image') ?? 'No Image URL';
 
-                    return Column(
-                      children: [
-                        Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ChatPage(
-                                    contact: FavoriteUser(
-                                      id: otherUserId,
-                                      name: otherUserName,
-                                      image: otherUserPhoto,
-                                    ),
+                  return Column(
+                    children: [
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatPage(
+                                  contact: FavoriteUser(
+                                    id: otherUserId,
+                                    name: otherUserName,
+                                    image: otherUserPhoto,
                                   ),
                                 ),
-                              );
-                            },
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
                               ),
-                              leading: CircleAvatar(
-                                backgroundImage: NetworkImage(otherUserPhoto),
+                            );
+                          },
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            leading: CircleAvatar(
+                              backgroundImage: NetworkImage(otherUserPhoto),
+                            ),
+                            title: Text(
+                              otherUserName,
+                              style: const TextStyle(
+                                fontSize: 16,
                               ),
-                              title: Text(
-                                otherUserName,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                ),
-                              ),
+                            ),
+                            subtitle: FutureBuilder<QuerySnapshot>(
+                              future: _firestore
+                                  .collection('chat_rooms')
+                                  .doc(documentId)
+                                  .collection('messages')
+                                  .orderBy('created_at', descending: true)
+                                  .limit(1)
+                                  .get(),
+                              builder: (context, snapshot) {
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting) {
+                                  return const SizedBox.shrink();
+                                }
+                                if (snapshot.hasError) {
+                                  return Text('Error: ${snapshot.error}');
+                                }
+                                if (!snapshot.hasData ||
+                                    snapshot.data!.docs.isEmpty) {
+                                  return const Text('No messages');
+                                }
+
+                                final lastMessageSnapshot =
+                                    snapshot.data!.docs.first;
+
+                                final lastMessageText =
+                                    lastMessageSnapshot['text'] as String;
+                                final lastMessageTime = (lastMessageSnapshot[
+                                        'created_at'] as Timestamp)
+                                    .toDate(); // Convert Timestamp to DateTime
+
+                                return Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          lastMessageText,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          _formatMessageTime(lastMessageTime),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
                           ),
                         ),
-                        const Divider(
-                          // Add a divider after each list item
-                          color: Colors.grey,
-                          height: 1,
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
+                      ),
+                      const Divider(
+                        color: Colors.grey,
+                        height: 1,
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
           ),
         ));
   }

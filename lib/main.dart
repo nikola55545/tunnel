@@ -17,10 +17,18 @@ import 'contacts_screen.dart';
 import 'chats_screen.dart';
 import 'settings_screen.dart';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   runApp(MyApp());
+
+  await FirebaseMessaging.instance.setAutoInitEnabled(true);
+
+  final fcmToken = await FirebaseMessaging.instance.getToken();
+  await FirebaseMessaging.instance.setAutoInitEnabled(true);
+  print("FCMToken $fcmToken");
 
   late final FirebaseMessaging _messaging;
 

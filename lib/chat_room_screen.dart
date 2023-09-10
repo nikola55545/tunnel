@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -21,7 +20,6 @@ import 'package:bubble/bubble.dart';
 // ignore: depend_on_referenced_packages
 import 'package:intl/intl.dart';
 import 'chat_info.dart';
-import 'package:dio/dio.dart';
 
 class ChatPage extends StatefulWidget {
   final FavoriteUser contact;
@@ -65,6 +63,8 @@ class _ChatPageState extends State<ChatPage> {
     required types.Message message,
     required dynamic nextMessageInGroup,
   }) {
+    bool isImageMessage = message is types.ImageMessage;
+
     final DateTime messageTime = DateTime.fromMillisecondsSinceEpoch(
         message.createdAt ?? DateTime.now().millisecondsSinceEpoch);
     final String timestamp = DateFormat('H:mm').format(messageTime);
@@ -84,7 +84,29 @@ class _ChatPageState extends State<ChatPage> {
             ? Colors.white
             : const Color.fromARGB(255, 159, 159, 159);
 
-    bool isShortMessage = (message as types.TextMessage).text.length <= 20;
+    // Apply different styles for image messages
+    if (isImageMessage) {
+      bubbleColor = Colors.transparent;
+      textColor = isCurrentUser
+          ? CupertinoColors.white
+          : isDarkMode
+              ? Colors.white
+              : const Color.fromARGB(255, 109, 109, 109);
+    }
+
+    // Create a rounded container for the image
+    Widget imageWidget = child;
+    if (isImageMessage) {
+      imageWidget = Container(
+        decoration: BoxDecoration(
+          borderRadius:
+              BorderRadius.circular(10), // Adjust the radius as needed
+          color: bubbleColor,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: child,
+      );
+    }
 
     return Bubble(
       radius: const Radius.circular(10),
@@ -106,11 +128,8 @@ class _ChatPageState extends State<ChatPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          child,
-          if (isShortMessage)
-            const SizedBox(height: 0)
-          else
-            const SizedBox(height: 0), // Adjust the spacing as needed
+          imageWidget, // Use the modified image widget
+          const SizedBox(height: 0),
           Text(
             timestamp,
             style: TextStyle(
@@ -206,17 +225,15 @@ class _ChatPageState extends State<ChatPage> {
 
   void _loadMessages() async {
     try {
-      // Initialize Firebase if not already initialized
-      await Firebase.initializeApp();
+      await Firebase
+          .initializeApp(); // Initialize Firebase if not already initialized
 
       final currentUserId = FirebaseAuth.instance.currentUser?.uid;
       final selectedUserId = widget.contact.id;
 
-      // Generate both possible chat room names
       final chatRoomName1 = '$currentUserId-$selectedUserId';
       final chatRoomName2 = '$selectedUserId-$currentUserId';
 
-      // Get references to both possible chat room documents
       final chatRoomRef1 = FirebaseFirestore.instance
           .collection('chat_rooms')
           .doc(chatRoomName1);
@@ -224,7 +241,6 @@ class _ChatPageState extends State<ChatPage> {
           .collection('chat_rooms')
           .doc(chatRoomName2);
 
-      // Fetch messages from the chat room that exists or fallback to the other one
       CollectionReference messagesCollection;
       Stream<QuerySnapshot> messagesStream;
 
@@ -239,23 +255,43 @@ class _ChatPageState extends State<ChatPage> {
           .snapshots();
 
       messagesStream.listen((querySnapshot) {
-        final messages = querySnapshot.docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
+        final messages = querySnapshot.docs
+            .map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
 
-          final authorId = data['author_id'] as String?;
-          final createdAt =
-              (data['created_at'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
-          final text = data['text'] as String?;
+              final authorId = data['author_id'] as String?;
+              final createdAt =
+                  (data['created_at'] as Timestamp?)?.millisecondsSinceEpoch ??
+                      0;
+              final text = data['text'] as String?;
+              final imageUri = data['image_uri'] as String?;
 
-          return types.TextMessage(
-            author: types.User(
-              id: authorId ?? '',
-            ),
-            createdAt: createdAt,
-            id: doc.id,
-            text: text ?? '',
-          );
-        }).toList();
+              if (text != null) {
+                return types.TextMessage(
+                  author: types.User(
+                    id: authorId ?? '',
+                  ),
+                  createdAt: createdAt,
+                  id: doc.id,
+                  text: text,
+                );
+              } else if (imageUri != null) {
+                return types.ImageMessage(
+                  name: 'Photo',
+                  size: 1,
+                  author: types.User(
+                    id: authorId ?? '',
+                  ),
+                  createdAt: createdAt,
+                  id: doc.id,
+                  uri: imageUri,
+                );
+              }
+
+              return null;
+            })
+            .whereType<types.Message>()
+            .toList();
 
         setState(() {
           _messages.clear();
@@ -263,12 +299,11 @@ class _ChatPageState extends State<ChatPage> {
           if (_messages.isNotEmpty &&
               _messages.first.author.id != currentUserId) {
             _isNewMessageArrived = true;
-            _playReceiveMessageSound(); // Play receive sound
+            _playReceiveMessageSound();
           }
         });
       });
     } catch (e) {
-      // Handle any errors here
       if (kDebugMode) {
         print('Error loading messages: $e');
       }
@@ -284,6 +319,7 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  // ignore: unused_element
   void _addMessage(types.Message message) {
     setState(() {
       _messages.insert(0, message);
@@ -291,63 +327,354 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _handleImageSelection() async {
-    final result = await ImagePicker().pickImage(
-      imageQuality: 70,
-      maxWidth: 1440,
-      source: ImageSource.gallery,
-    );
-
-    if (result != null) {
-      final bytes = await result.readAsBytes();
-      final image = await decodeImageFromList(bytes);
-
-      final message = types.ImageMessage(
-        author: const types.User(
-          id: 'current_user_id',
-        ),
-        createdAt: DateTime.now().millisecondsSinceEpoch,
-        height: image.height.toDouble(),
-        id: 'current_user_id',
-        name: result.name,
-        size: bytes.length,
-        uri: result.path,
-        width: image.width.toDouble(),
+    try {
+      final result = await ImagePicker().pickImage(
+        imageQuality: 70,
+        maxWidth: 1440,
+        source: ImageSource.gallery,
       );
 
-      _addMessage(message);
+      if (result != null) {
+        final bytes = await result.readAsBytes();
+        final image = await decodeImageFromList(bytes);
+
+        final currentUserId =
+            FirebaseAuth.instance.currentUser!.uid; // Retrieve currentUserId
+
+        final newImageMessage = types.ImageMessage(
+          author: types.User(
+            id: currentUserId,
+          ),
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+          height: image.height?.toDouble() ??
+              0, // Provide a default value of 0 if null
+          id: UniqueKey().toString(),
+          name: result.name,
+          size: bytes.length,
+          uri:
+              '', // Initialize uri to an empty string, will be updated after upload
+          width: image.width?.toDouble() ??
+              0, // Provide a default value of 0 if null
+        );
+
+        // Upload the image to Firebase Storage
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('chat_images')
+            .child('${newImageMessage.id}.jpg');
+        final uploadTask = storageRef.putData(Uint8List.fromList(bytes));
+
+        // Listen to the upload task completion
+        await uploadTask.whenComplete(() async {
+          final downloadUrl = await storageRef.getDownloadURL();
+
+          // Update the image message with the download URL
+          final updatedImageMessage =
+              newImageMessage.copyWith(uri: downloadUrl);
+
+          // Add the image message to the messages collection in Firestore
+          final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+          final selectedUserId = widget.contact.id;
+
+          final chatRoomName1 = '$currentUserId-$selectedUserId';
+          final chatRoomName2 = '$selectedUserId-$currentUserId';
+
+          final chatRoomRef1 = FirebaseFirestore.instance
+              .collection('chat_rooms')
+              .doc(chatRoomName1);
+          final chatRoomRef2 = FirebaseFirestore.instance
+              .collection('chat_rooms')
+              .doc(chatRoomName2);
+
+          final messagesCollection = (await chatRoomRef1.get()).exists
+              ? chatRoomRef1.collection('messages')
+              : chatRoomRef2.collection('messages');
+
+          await messagesCollection.add({
+            'author_id': currentUserId,
+            'text': null, // Since it's an image message, text can be null
+            'created_at': FieldValue.serverTimestamp(),
+            'image_uri': downloadUrl, // Store the image URI
+          });
+
+          // You might want to call _loadMessages() here to refresh the messages
+
+          setState(() {
+            _messages.add(newImageMessage);
+            _isNewMessageArrived = false;
+          });
+        });
+      } else {
+        print("result is null");
+      }
+    } catch (e) {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text(e.toString()),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
+  void _handleCameraSelection() async {
+    try {
+      final result = await ImagePicker().pickImage(
+        imageQuality: 70,
+        maxWidth: 1440,
+        source: ImageSource.camera,
+      );
+
+      if (result != null) {
+        final bytes = await result.readAsBytes();
+        final image = await decodeImageFromList(bytes);
+
+        final currentUserId =
+            FirebaseAuth.instance.currentUser!.uid; // Retrieve currentUserId
+
+        final newImageMessage = types.ImageMessage(
+          author: types.User(
+            id: currentUserId,
+          ),
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+          height: image.height?.toDouble() ??
+              0, // Provide a default value of 0 if null
+          id: UniqueKey().toString(),
+          name: result.name,
+          size: bytes.length,
+          uri:
+              '', // Initialize uri to an empty string, will be updated after upload
+          width: image.width?.toDouble() ??
+              0, // Provide a default value of 0 if null
+        );
+
+        // Upload the image to Firebase Storage
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('chat_images')
+            .child('${newImageMessage.id}.jpg');
+        final uploadTask = storageRef.putData(Uint8List.fromList(bytes));
+
+        // Listen to the upload task completion
+        await uploadTask.whenComplete(() async {
+          final downloadUrl = await storageRef.getDownloadURL();
+
+          // Update the image message with the download URL
+          final updatedImageMessage =
+              newImageMessage.copyWith(uri: downloadUrl);
+
+          // Add the image message to the messages collection in Firestore
+          final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+          final selectedUserId = widget.contact.id;
+
+          final chatRoomName1 = '$currentUserId-$selectedUserId';
+          final chatRoomName2 = '$selectedUserId-$currentUserId';
+
+          final chatRoomRef1 = FirebaseFirestore.instance
+              .collection('chat_rooms')
+              .doc(chatRoomName1);
+          final chatRoomRef2 = FirebaseFirestore.instance
+              .collection('chat_rooms')
+              .doc(chatRoomName2);
+
+          final messagesCollection = (await chatRoomRef1.get()).exists
+              ? chatRoomRef1.collection('messages')
+              : chatRoomRef2.collection('messages');
+
+          await messagesCollection.add({
+            'author_id': currentUserId,
+            'text': null, // Since it's an image message, text can be null
+            'created_at': FieldValue.serverTimestamp(),
+            'image_uri': downloadUrl, // Store the image URI
+          });
+
+          // You might want to call _loadMessages() here to refresh the messages
+
+          setState(() {
+            _messages.add(newImageMessage);
+            _isNewMessageArrived = false;
+          });
+        });
+      } else {
+        print("result is null");
+      }
+    } catch (e) {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text(e.toString()),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 
   void _handleAttachmentPressed() {
+    final bool isDarkMode =
+        MediaQuery.of(context).platformBrightness == Brightness.dark;
+
     showModalBottomSheet<void>(
+      backgroundColor: Colors.transparent,
       context: context,
       builder: (BuildContext context) => SafeArea(
-        child: SizedBox(
-          height: 150,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _handleImageSelection();
-                },
-                child: const Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text('Photo'),
+        child: Container(
+          padding: const EdgeInsets.only(top: 18),
+          decoration: BoxDecoration(
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(16),
+              bottom: Radius.circular(16),
+            ),
+            color: isDarkMode ? const Color(0xFF1B1B1B) : Colors.white,
+          ),
+          child: SizedBox(
+            height: 170,
+            child: Column(
+              children: [
+                const Text("Share", style: TextStyle(fontSize: 18)),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                            _handleImageSelection();
+                          },
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(16), // Rounded corners
+                              color: CupertinoColors.systemBlue,
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                CupertinoIcons.photo,
+                                color: CupertinoColors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(
+                            height: 16), // Add spacing between text and circle
+                        const Text('Photo', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(width: 32),
+                    Column(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                            _handleCameraSelection();
+                          },
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(16), // Rounded corners
+                              color: CupertinoColors.systemGreen,
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                CupertinoIcons.camera,
+                                color: CupertinoColors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(
+                            height: 16), // Add spacing between text and circle
+                        const Text('Camera', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(width: 32),
+                    Column(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                            // _handleCameraSelection();
+                          },
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(16), // Rounded corners
+                              color: CupertinoColors.systemOrange,
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                CupertinoIcons.doc,
+                                color: CupertinoColors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(
+                            height: 16), // Add spacing between text and circle
+                        const Text('Document', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(width: 32),
+                    Column(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                          },
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              borderRadius:
+                                  BorderRadius.circular(16), // Rounded corners
+                              color: CupertinoColors.systemRed,
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                CupertinoIcons.map_pin_ellipse,
+                                color: CupertinoColors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(
+                            height: 16), // Add spacing between text and circle
+                        const Text('Location', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ],
                 ),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  // _handleCameraSelection();
-                },
-                child: const Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text('Camera'),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -359,11 +686,13 @@ class _ChatPageState extends State<ChatPage> {
     final bool isDarkMode = getCustomColor(context) == Colors.black;
 
     if (_isNewMessageArrived) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      try {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      } catch (e) {}
     }
 
     TextStyle generateReceivedMessageBodyTextStyle() {
@@ -428,8 +757,6 @@ class _ChatPageState extends State<ChatPage> {
         : CupertinoColors.black;
 
     return CupertinoPageScaffold(
-      //add backgorund image
-
       navigationBar: CupertinoNavigationBar(
         middle: Text(
           widget.contact.name,
@@ -470,52 +797,55 @@ class _ChatPageState extends State<ChatPage> {
                 currentFocus.unfocus();
               }
             },
-            child: Chat(
-              bubbleBuilder: _bubbleBuilder,
-              messages: _messages.toList(),
-              user: types.User(id: currentUserId), // Set the current user
-              emptyState: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Say Hello to ${widget.contact.name}!',
-                      style: TextStyle(
-                          color:
-                              getCustomColor(context) == const Color(0xFF1B1B1B)
-                                  ? const Color(0xFF8E8E8E)
-                                  : const Color(0xFF8E8E8E),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          decoration: TextDecoration.none),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
-              onAttachmentPressed: _handleAttachmentPressed,
-              onSendPressed: _handleSendPressed,
-              theme: theme,
-              hideBackgroundOnEmojiMessages: true,
-              scrollToUnreadOptions: const ScrollToUnreadOptions(
-                  //todo
+            child: Material(
+              child: Chat(
+                bubbleBuilder: _bubbleBuilder,
+                messages: _messages.toList(),
+                user: types.User(id: currentUserId), // Set the current user
+                emptyState: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Say Hello to ${widget.contact.name}!',
+                        style: TextStyle(
+                            color: getCustomColor(context) ==
+                                    const Color(0xFF1B1B1B)
+                                ? const Color(0xFF8E8E8E)
+                                : const Color(0xFF8E8E8E),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            decoration: TextDecoration.none),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
-              isAttachmentUploading: false,
-              scrollPhysics: const AlwaysScrollableScrollPhysics(),
-              inputOptions: InputOptions(
-                inputClearMode: InputClearMode.always,
-                keyboardType: TextInputType.multiline,
-                onTextChanged: (text) {
-                  // Handle text changed
-                },
-                enableSuggestions: true,
-                enabled: true,
+                ),
+                onAttachmentPressed: _handleAttachmentPressed,
+                onSendPressed: _handleSendPressed,
+                theme: theme,
+                hideBackgroundOnEmojiMessages: true,
+                scrollToUnreadOptions: const ScrollToUnreadOptions(
+                    //todo
+                    ),
+                isAttachmentUploading: false,
+                scrollPhysics: const AlwaysScrollableScrollPhysics(),
+                inputOptions: InputOptions(
+                  inputClearMode: InputClearMode.always,
+                  keyboardType: TextInputType.multiline,
+                  onTextChanged: (text) {
+                    // Handle text changed
+                  },
+                  enableSuggestions: true,
+                  enabled: true,
+                ),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.manual,
+                typingIndicatorOptions: const TypingIndicatorOptions(
+                  typingMode: TypingIndicatorMode.name,
+                ),
+                usePreviewData: true,
               ),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-              typingIndicatorOptions: const TypingIndicatorOptions(
-                typingMode: TypingIndicatorMode.name,
-              ),
-              usePreviewData: true,
             ),
           ),
         ),
